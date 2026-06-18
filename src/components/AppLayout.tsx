@@ -2,7 +2,8 @@
 
 import React from 'react';
 import Link from 'next/link';
-import { UtensilsCrossed, ChefHat, ReceiptText, Settings, PackageOpen, Coffee, BarChart3, PanelLeft, Wallet, User } from 'lucide-react';
+import { useRouter } from 'next/navigation';
+import { UtensilsCrossed, ChefHat, ReceiptText, Settings, PackageOpen, Coffee, BarChart3, PanelLeft, Wallet, User, LogOut } from 'lucide-react';
 import {
   Sidebar, SidebarContent, SidebarGroup, SidebarGroupContent, SidebarGroupLabel,
   SidebarMenu, SidebarMenuItem, SidebarMenuButton, SidebarHeader, SidebarFooter,
@@ -97,6 +98,17 @@ function AppSidebar() {
 }
 
 const AppLayout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const router = useRouter();
+
+  const handleLogout = async () => {
+    try {
+      await fetch('/api/auth/logout', { method: 'POST' });
+    } finally {
+      router.replace('/login');
+      router.refresh();
+    }
+  };
+
   return (
     <SidebarProvider>
       <div className="min-h-screen flex w-full">
@@ -105,6 +117,14 @@ const AppLayout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
           <header className="h-12 flex items-center border-b border-border bg-card px-4 gap-3">
             <SidebarTrigger />
             <span className="text-sm font-medium text-muted-foreground md:hidden">Spicy Ocean</span>
+            <button
+              onClick={handleLogout}
+              className="ml-auto flex items-center gap-1.5 text-sm text-muted-foreground hover:text-destructive transition-colors"
+              title="Sign out"
+            >
+              <LogOut className="h-4 w-4" />
+              <span className="hidden sm:inline">Logout</span>
+            </button>
           </header>
           <main className="flex-1 overflow-auto">
             {children}

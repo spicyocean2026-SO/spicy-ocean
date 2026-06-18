@@ -3,16 +3,15 @@
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Lock, ReceiptText, BarChart3, CheckCircle, LogOut, FileText, PackageOpen, Coffee } from 'lucide-react';
-import { useRestaurant } from '@/context/RestaurantContext';
+import { useRestaurant, TableOrder } from '@/context/RestaurantContext';
 import OrderCard from '@/components/OrderCard';
 import BillModal from '@/components/BillModal';
 import { Badge } from '@/components/ui/badge';
-import type { TableOrder } from '@/context/RestaurantContext';
 
 const CounterPage: React.FC = () => {
   const {
     isCounterAuthenticated, authenticateCounter, logoutCounter,
-    orders, takeAwayOrders, teaSnacksOrders, markTablePaid, clearTable, settings, getNextInvoice,
+    activeOrders, markPaid, clearOrder, settings, getNextInvoice,
   } = useRestaurant();
   const [pin, setPin] = useState('');
   const [activeTab, setActiveTab] = useState<'orders' | 'summary'>('orders');
@@ -63,25 +62,13 @@ const CounterPage: React.FC = () => {
     );
   }
 
-  const allOrders = [
-    ...Object.entries(orders).map(([k, o]) => ({ key: k, order: { ...o, type: 'DINE_IN' as const } })),
-    ...Object.entries(takeAwayOrders).map(([k, o]) => ({ key: k, order: { ...o, type: 'TAKE_AWAY' as const } })),
-    ...Object.entries(teaSnacksOrders).map(([k, o]) => ({ key: k, order: { ...o, type: 'TEA_SNACKS' as const } })),
-  ];
-  const activeOrders = allOrders.filter(({ order }) => order.items.length > 0);
-  const totalRevenue = activeOrders.reduce((sum, { order }) => sum + order.items.reduce((s, i) => s + i.menuItem.price * i.quantity, 0), 0);
+  const orders = activeOrders.filter((o) => o.items.length > 0);
   const tax = settings.taxPercent;
+  const totalRevenue = orders.reduce((sum, o) => sum + o.items.reduce((s, i) => s + i.menuItem.price * i.quantity, 0), 0);
 
-  const getTypeLabel = (type: string) => {
-    if (type === 'TAKE_AWAY') return 'Take Away';
-    if (type === 'TEA_SNACKS') return 'Tea & Snacks';
-    return 'Dine-In';
-  };
-  const getTypeIcon = (type: string) => {
-    if (type === 'TAKE_AWAY') return '🥡';
-    if (type === 'TEA_SNACKS') return '☕';
-    return '🍽';
-  };
+  const getTypeLabel = (type: string) => type === 'TAKE_AWAY' ? 'Take Away' : type === 'TEA_SNACKS' ? 'Tea & Snacks' : 'Dine-In';
+  const getTypeIcon = (type: string) => type === 'TAKE_AWAY' ? '🥡' : type === 'TEA_SNACKS' ? '☕' : '🍽';
+  const labelFor = (o: TableOrder) => o.type === 'DINE_IN' ? `Table ${o.tableNumber}` : (o.orderNo || o.orderId || '');
 
   return (
     <div className="p-4 md:p-6 max-w-6xl mx-auto">
@@ -108,20 +95,19 @@ const CounterPage: React.FC = () => {
 
       {activeTab === 'orders' ? (
         <div className="space-y-4">
-          {activeOrders.length === 0 ? (
+          {orders.length === 0 ? (
             <p className="text-center text-muted-foreground py-20">No active orders</p>
           ) : (
-            activeOrders.map(({ key, order }) => {
+            orders.map((order) => {
               const total = order.items.reduce((s, i) => s + i.menuItem.price * i.quantity, 0);
-              const label = order.type === 'DINE_IN' ? `Table ${order.tableNumber}` : (order.orderId || key);
               return (
-                <motion.div key={key} initial={{ opacity: 0 }} animate={{ opacity: 1 }}
+                <motion.div key={order.orderId} initial={{ opacity: 0 }} animate={{ opacity: 1 }}
                   className="bg-card rounded-xl border border-border p-4 shadow-sm">
                   <div className="flex items-center justify-between mb-3">
                     <div className="flex items-center gap-2">
                       {order.type === 'TAKE_AWAY' && <PackageOpen className="w-4 h-4 text-primary" />}
                       {order.type === 'TEA_SNACKS' && <Coffee className="w-4 h-4 text-primary" />}
-                      <h3 className="font-semibold text-foreground">{label}</h3>
+                      <h3 className="font-semibold text-foreground">{labelFor(order)}</h3>
                       <Badge className="text-xs bg-muted text-muted-foreground">{getTypeLabel(order.type)}</Badge>
                     </div>
                     <div className="flex items-center gap-2">
@@ -133,18 +119,18 @@ const CounterPage: React.FC = () => {
                   </div>
                   {order.items.map(item => <OrderCard key={item.menuItem.id} item={item} />)}
                   <div className="flex gap-2 mt-3 pt-3 border-t border-border flex-wrap">
-                    <button onClick={() => setBillOrder({ order: order as TableOrder, invoice: getNextInvoice() })}
+                    <button onClick={() => setBillOrder({ order, invoice: getNextInvoice() })}
                       className="flex items-center gap-1 px-4 py-2 rounded-lg bg-muted text-sm font-medium text-foreground hover:bg-muted/70 transition-colors">
                       <FileText className="w-4 h-4" /> Generate Bill
                     </button>
                     {order.paymentStatus !== 'paid' && (
-                      <button onClick={() => markTablePaid(key)}
+                      <button onClick={() => order.orderId && markPaid(order.orderId)}
                         className="flex items-center gap-1 px-4 py-2 rounded-lg gradient-primary text-primary-foreground text-sm font-medium">
                         <CheckCircle className="w-4 h-4" /> Mark Paid
                       </button>
                     )}
                     {order.paymentStatus === 'paid' && (
-                      <button onClick={() => clearTable(key)}
+                      <button onClick={() => clearOrder(order)}
                         className="px-4 py-2 rounded-lg bg-muted text-sm font-medium text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-colors">
                         Clear
                       </button>
@@ -159,29 +145,28 @@ const CounterPage: React.FC = () => {
         <div className="space-y-4">
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
             <div className="bg-card rounded-xl border border-border p-6 shadow-sm">
-              <p className="text-sm text-muted-foreground">Total Orders</p>
-              <p className="text-3xl font-bold text-foreground mt-1">{activeOrders.length}</p>
+              <p className="text-sm text-muted-foreground">Active Orders</p>
+              <p className="text-3xl font-bold text-foreground mt-1">{orders.length}</p>
             </div>
             <div className="bg-card rounded-xl border border-border p-6 shadow-sm">
-              <p className="text-sm text-muted-foreground">Total Revenue</p>
+              <p className="text-sm text-muted-foreground">Total (with tax)</p>
               <p className="text-3xl font-bold text-primary mt-1">₹{(totalRevenue * (1 + tax / 100)).toFixed(0)}</p>
             </div>
             <div className="bg-card rounded-xl border border-border p-6 shadow-sm">
-              <p className="text-sm text-muted-foreground">Tea & Snacks Orders</p>
-              <p className="text-3xl font-bold text-foreground mt-1">{activeOrders.filter(o => o.order.type === 'TEA_SNACKS').length}</p>
+              <p className="text-sm text-muted-foreground">Tea &amp; Snacks Orders</p>
+              <p className="text-3xl font-bold text-foreground mt-1">{orders.filter(o => o.type === 'TEA_SNACKS').length}</p>
             </div>
           </div>
           <div className="bg-card rounded-xl border border-border p-4 shadow-sm">
             <h3 className="font-semibold text-foreground mb-3 flex items-center gap-2">
               <BarChart3 className="w-5 h-5 text-primary" /> Order Breakdown
             </h3>
-            {activeOrders.map(({ key, order }) => {
+            {orders.map((order) => {
               const total = order.items.reduce((s, i) => s + i.menuItem.price * i.quantity, 0);
-              const label = order.type === 'DINE_IN' ? `Table ${order.tableNumber}` : (order.orderId || key);
               return (
-                <div key={key} className="flex justify-between items-center py-2 border-b border-border last:border-0">
+                <div key={order.orderId} className="flex justify-between items-center py-2 border-b border-border last:border-0">
                   <div className="flex items-center gap-2">
-                    <span className="text-sm text-foreground">{label}</span>
+                    <span className="text-sm text-foreground">{labelFor(order)}</span>
                     <Badge className="text-xs bg-muted text-muted-foreground">{getTypeIcon(order.type)}</Badge>
                   </div>
                   <div className="flex items-center gap-3">

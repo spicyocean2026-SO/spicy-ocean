@@ -5,7 +5,6 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { RestaurantProvider } from "@/context/RestaurantContext";
-import AppLayout from "@/components/AppLayout";
 
 export function Providers({ children }: { children: React.ReactNode }) {
   // Create the QueryClient once per browser session.
@@ -27,9 +26,7 @@ export function Providers({ children }: { children: React.ReactNode }) {
     <QueryClientProvider client={queryClient}>
       <TooltipProvider>
         <Sonner />
-        <RestaurantProvider>
-          <AppLayout>{children}</AppLayout>
-        </RestaurantProvider>
+        <RestaurantProvider>{children}</RestaurantProvider>
       </TooltipProvider>
     </QueryClientProvider>
   );

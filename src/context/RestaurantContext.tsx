@@ -1,6 +1,6 @@
 "use client";
 
-import React, { createContext, useContext, useState, useEffect, useCallback, ReactNode } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback, useRef, ReactNode } from 'react';
 import { toast } from 'sonner';
 
 export interface MenuItem {
@@ -8,6 +8,7 @@ export interface MenuItem {
   name: string;
   price: number;
   category: string;
+  kind?: 'FOOD' | 'TEA_SNACKS';
   image?: string;
 }
 
@@ -18,12 +19,13 @@ export interface OrderItem {
 }
 
 export interface TableOrder {
+  orderId?: string;
+  orderNo?: string;
   tableNumber: number;
   items: OrderItem[];
   paymentStatus: 'pending' | 'paid';
-  createdAt: Date;
+  createdAt: string | Date;
   type: 'DINE_IN' | 'TAKE_AWAY' | 'TEA_SNACKS';
-  orderId?: string;
 }
 
 export interface OrderHistoryEntry {
@@ -41,186 +43,116 @@ export interface RestaurantSettings {
   soundEnabled: boolean;
 }
 
+export interface CartLine {
+  menuItem: MenuItem;
+  quantity: number;
+}
+
 interface RestaurantContextType {
+  // Menu
   menuItems: MenuItem[];
-  addMenuItem: (item: Omit<MenuItem, 'id'>) => void;
-  updateMenuItem: (id: string, updates: Partial<Omit<MenuItem, 'id'>>) => void;
-  deleteMenuItem: (id: string) => void;
+  teaSnacksItems: MenuItem[];
+  menuLoading: boolean;
+  addMenuItem: (item: { name: string; price: number; category: string; kind?: 'FOOD' | 'TEA_SNACKS' }) => Promise<void>;
+  updateMenuItem: (id: string, updates: Partial<Pick<MenuItem, 'name' | 'price' | 'category'>>) => Promise<void>;
+  deleteMenuItem: (id: string) => Promise<void>;
+
   tables: number[];
-  orders: Record<string, TableOrder>;
-  addItemToTable: (tableNumber: number, item: MenuItem) => void;
-  removeItemFromTable: (tableKey: string, itemId: string) => void;
-  updateItemQuantity: (tableKey: string, itemId: string, quantity: number) => void;
-  updateItemStatus: (tableKey: string, itemId: string, status: OrderItem['status']) => void;
-  clearTable: (tableKey: string) => void;
-  markTablePaid: (tableKey: string) => void;
-  getActiveOrders: () => TableOrder[];
+
+  // Orders (live)
+  activeOrders: TableOrder[];
+  ordersLoading: boolean;
+  getTableOrder: (tableNumber: number) => TableOrder | undefined;
+  refreshOrders: () => Promise<void>;
+  placeOrder: (input: { type: TableOrder['type']; tableNumber?: number; items: CartLine[] }) => Promise<TableOrder | null>;
+  updateItemStatus: (orderId: string, menuItemId: string, status: OrderItem['status']) => Promise<void>;
+  updateItemQuantity: (orderId: string, menuItemId: string, quantity: number) => Promise<void>;
+  markPaid: (orderId: string) => Promise<void>;
+  clearOrder: (order: TableOrder) => Promise<void>;
+
+  // Counter auth
   isCounterAuthenticated: boolean;
   authenticateCounter: (pin: string) => boolean;
   logoutCounter: () => void;
   changePin: (currentPin: string, newPin: string) => boolean;
-  // Take Away
-  takeAwayOrders: Record<string, TableOrder>;
-  createTakeAwayOrder: () => string;
-  addItemToTakeAway: (orderId: string, item: MenuItem) => void;
-  removeItemFromTakeAway: (orderId: string, itemId: string) => void;
-  updateTakeAwayItemQuantity: (orderId: string, itemId: string, quantity: number) => void;
-  // Tea & Snacks
-  teaSnacksItems: MenuItem[];
-  teaSnacksOrders: Record<string, TableOrder>;
-  createTeaSnacksOrder: () => string;
-  addItemToTeaSnacks: (orderId: string, item: MenuItem) => void;
-  removeItemFromTeaSnacks: (orderId: string, itemId: string) => void;
-  updateTeaSnacksItemQuantity: (orderId: string, itemId: string, quantity: number) => void;
+
   // Settings
   settings: RestaurantSettings;
   updateSettings: (s: Partial<RestaurantSettings>) => void;
+
   // Sounds
   playOrderSound: () => void;
   playReadySound: () => void;
+
   // Invoice
   nextInvoiceNumber: number;
   getNextInvoice: () => string;
-  // Order history
+
+  // Order history (local)
   orderHistory: OrderHistoryEntry[];
   addToHistory: (entry: OrderHistoryEntry) => void;
 }
 
-const defaultMenuItems: MenuItem[] = [
-  { id: '1', name: 'Tomato Soup', price: 120, category: 'Soups' },
-  { id: '2', name: 'Sweet Corn Soup', price: 130, category: 'Soups' },
-  { id: '3', name: 'Manchow Soup', price: 140, category: 'Soups' },
-  { id: '4', name: 'Hot & Sour Soup', price: 130, category: 'Soups' },
-  { id: '5', name: 'Paneer Tikka', price: 220, category: 'Starters' },
-  { id: '6', name: 'Chicken 65', price: 250, category: 'Starters' },
-  { id: '7', name: 'Gobi Manchurian', price: 180, category: 'Starters' },
-  { id: '8', name: 'Fish Fry', price: 280, category: 'Starters' },
-  { id: '9', name: 'Prawns Fry', price: 320, category: 'Starters' },
-  { id: '10', name: 'Chicken Dum Biriyani', price: 280, category: 'Biriyani' },
-  { id: '11', name: 'Mutton Biriyani', price: 350, category: 'Biriyani' },
-  { id: '12', name: 'Prawns Biriyani', price: 380, category: 'Biriyani' },
-  { id: '13', name: 'Veg Biriyani', price: 200, category: 'Biriyani' },
-  { id: '14', name: 'Egg Biriyani', price: 220, category: 'Biriyani' },
-  { id: '15', name: 'Mango Lassi', price: 100, category: 'Cocktails' },
-  { id: '16', name: 'Blue Lagoon', price: 150, category: 'Cocktails' },
-  { id: '17', name: 'Mojito', price: 140, category: 'Cocktails' },
-  { id: '18', name: 'Watermelon Cooler', price: 120, category: 'Cocktails' },
-];
-
-const defaultTeaSnacksItems: MenuItem[] = [
-  { id: 'ts1', name: 'Special Tea', price: 30, category: 'Tea' },
-  { id: 'ts2', name: 'Ginger Tea', price: 35, category: 'Tea' },
-  { id: 'ts3', name: 'Lemon Tea', price: 35, category: 'Tea' },
-  { id: 'ts4', name: 'Coffee', price: 40, category: 'Tea' },
-  { id: 'ts5', name: 'Milk', price: 25, category: 'Tea' },
-  { id: 'ts6', name: 'Samosa', price: 20, category: 'Veg Snacks' },
-  { id: 'ts7', name: 'Corn Samosa', price: 25, category: 'Veg Snacks' },
-  { id: 'ts8', name: 'Veg Rolls', price: 40, category: 'Veg Snacks' },
-  { id: 'ts9', name: 'French Fries', price: 80, category: 'Veg Snacks' },
-  { id: 'ts10', name: 'Chicken Popcorn', price: 120, category: 'Non-Veg Snacks' },
-  { id: 'ts11', name: 'Chicken Nuggets', price: 130, category: 'Non-Veg Snacks' },
-  { id: 'ts12', name: 'Chicken Rolls', price: 100, category: 'Non-Veg Snacks' },
-];
-
-const generateOrderId = (prefix: string, counter: number) => {
-  const d = new Date();
-  const dateStr = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}`;
-  return `${prefix}-${dateStr}-${String(counter).padStart(3, '0')}`;
-};
-
 const RestaurantContext = createContext<RestaurantContextType | undefined>(undefined);
 
+const POLL_MS = 4000;
+
+// Map an API order into the UI TableOrder shape.
+function mapOrder(o: any): TableOrder {
+  return {
+    orderId: o.orderId,
+    orderNo: o.orderNo,
+    tableNumber: o.tableNumber,
+    paymentStatus: o.paymentStatus,
+    createdAt: o.createdAt,
+    type: o.type,
+    items: (o.items ?? []).map((i: any) => ({
+      menuItem: i.menuItem,
+      quantity: i.quantity,
+      status: i.status,
+    })),
+  };
+}
+
+const isOrderReady = (o: TableOrder) =>
+  o.items.length > 0 && o.items.every((i) => i.status === 'ready' || i.status === 'completed');
+
 export const RestaurantProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
-  const [menuItems, setMenuItems] = useState<MenuItem[]>(() => {
-    const saved = localStorage.getItem('kadali_menu');
-    return saved ? JSON.parse(saved) : defaultMenuItems;
-  });
+  const [menuItems, setMenuItems] = useState<MenuItem[]>([]);
+  const [teaSnacksItems, setTeaSnacksItems] = useState<MenuItem[]>([]);
+  const [menuLoading, setMenuLoading] = useState(true);
 
-  const [orders, setOrders] = useState<Record<string, TableOrder>>(() => {
-    const saved = localStorage.getItem('kadali_orders');
-    return saved ? JSON.parse(saved) : {};
-  });
-
-  const [takeAwayOrders, setTakeAwayOrders] = useState<Record<string, TableOrder>>(() => {
-    const saved = localStorage.getItem('kadali_takeaway');
-    return saved ? JSON.parse(saved) : {};
-  });
-
-  const [teaSnacksOrders, setTeaSnacksOrders] = useState<Record<string, TableOrder>>(() => {
-    const saved = localStorage.getItem('kadali_teasnacks');
-    return saved ? JSON.parse(saved) : {};
-  });
-
-  const [takeAwayCounter, setTakeAwayCounter] = useState(() => {
-    const saved = localStorage.getItem('kadali_ta_counter');
-    return saved ? parseInt(saved) : 0;
-  });
-
-  const [teaSnacksCounter, setTeaSnacksCounter] = useState(() => {
-    const saved = localStorage.getItem('kadali_ts_counter');
-    return saved ? parseInt(saved) : 0;
-  });
-
-  const [nextInvoiceNumber, setNextInvoiceNumber] = useState(() => {
-    const saved = localStorage.getItem('kadali_invoice');
-    return saved ? parseInt(saved) : 1;
-  });
-
-  const [settings, setSettings] = useState<RestaurantSettings>(() => {
-    const saved = localStorage.getItem('kadali_settings');
-    return saved ? JSON.parse(saved) : { taxPercent: 5, gstNumber: '', soundEnabled: true };
-  });
-
-  const [counterPin, setCounterPin] = useState(() => {
-    return localStorage.getItem('kadali_pin') || '1234';
-  });
-
-  const [isCounterAuthenticated, setIsCounterAuthenticated] = useState(() => {
-    return sessionStorage.getItem('kadali_counter_auth') === 'true';
-  });
-
-  const [orderHistory, setOrderHistory] = useState<OrderHistoryEntry[]>(() => {
-    const saved = localStorage.getItem('kadali_history');
-    return saved ? JSON.parse(saved) : [];
-  });
+  const [activeOrders, setActiveOrders] = useState<TableOrder[]>([]);
+  const [ordersLoading, setOrdersLoading] = useState(true);
 
   const tables = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
 
-  // Persistence
-  useEffect(() => { localStorage.setItem('kadali_menu', JSON.stringify(menuItems)); }, [menuItems]);
-  useEffect(() => { localStorage.setItem('kadali_orders', JSON.stringify(orders)); }, [orders]);
-  useEffect(() => { localStorage.setItem('kadali_takeaway', JSON.stringify(takeAwayOrders)); }, [takeAwayOrders]);
-  useEffect(() => { localStorage.setItem('kadali_teasnacks', JSON.stringify(teaSnacksOrders)); }, [teaSnacksOrders]);
-  useEffect(() => { localStorage.setItem('kadali_ta_counter', takeAwayCounter.toString()); }, [takeAwayCounter]);
-  useEffect(() => { localStorage.setItem('kadali_ts_counter', teaSnacksCounter.toString()); }, [teaSnacksCounter]);
+  // ---- Local-only state (settings, auth, invoice, history) ----
+  const [nextInvoiceNumber, setNextInvoiceNumber] = useState(() => {
+    const saved = typeof window !== 'undefined' ? localStorage.getItem('kadali_invoice') : null;
+    return saved ? parseInt(saved) : 1;
+  });
+  const [settings, setSettings] = useState<RestaurantSettings>(() => {
+    const saved = typeof window !== 'undefined' ? localStorage.getItem('kadali_settings') : null;
+    return saved ? JSON.parse(saved) : { taxPercent: 5, gstNumber: '', soundEnabled: true };
+  });
+  const [counterPin, setCounterPin] = useState(() =>
+    (typeof window !== 'undefined' ? localStorage.getItem('kadali_pin') : null) || '1234'
+  );
+  const [isCounterAuthenticated, setIsCounterAuthenticated] = useState(() =>
+    typeof window !== 'undefined' ? sessionStorage.getItem('kadali_counter_auth') === 'true' : false
+  );
+  const [orderHistory, setOrderHistory] = useState<OrderHistoryEntry[]>(() => {
+    const saved = typeof window !== 'undefined' ? localStorage.getItem('kadali_history') : null;
+    return saved ? JSON.parse(saved) : [];
+  });
+
   useEffect(() => { localStorage.setItem('kadali_invoice', nextInvoiceNumber.toString()); }, [nextInvoiceNumber]);
   useEffect(() => { localStorage.setItem('kadali_settings', JSON.stringify(settings)); }, [settings]);
   useEffect(() => { localStorage.setItem('kadali_pin', counterPin); }, [counterPin]);
   useEffect(() => { localStorage.setItem('kadali_history', JSON.stringify(orderHistory)); }, [orderHistory]);
 
-  // Daily auto-reset: clear active orders at midnight
-  useEffect(() => {
-    const checkDayChange = () => {
-      const lastDate = localStorage.getItem('kadali_last_active_date');
-      const today = new Date().toDateString();
-      if (lastDate && lastDate !== today) {
-        // Day changed — clear all active orders and counters
-        setOrders({});
-        setTakeAwayOrders({});
-        setTeaSnacksOrders({});
-        setTakeAwayCounter(0);
-        setTeaSnacksCounter(0);
-        setNextInvoiceNumber(1);
-        toast.info('New day started — active orders have been reset.');
-      }
-      localStorage.setItem('kadali_last_active_date', today);
-    };
-
-    checkDayChange();
-    const interval = setInterval(checkDayChange, 60000); // check every minute
-    return () => clearInterval(interval);
-  }, []);
-
+  // ---- Sounds ----
   const playOrderSound = useCallback(() => {
     if (!settings.soundEnabled) return;
     try {
@@ -265,176 +197,167 @@ export const RestaurantProvider: React.FC<{ children: ReactNode }> = ({ children
     } catch {}
   }, [settings.soundEnabled]);
 
-  const addMenuItem = (item: Omit<MenuItem, 'id'>) => {
-    const newItem = { ...item, id: Date.now().toString() };
-    setMenuItems(prev => [...prev, newItem]);
+  // ---- Menu (from API) ----
+  const refreshMenu = useCallback(async () => {
+    try {
+      const res = await fetch('/api/menu', { cache: 'no-store' });
+      const data: MenuItem[] = await res.json();
+      if (!res.ok) throw new Error((data as any)?.error || 'Failed to load menu');
+      setMenuItems(data.filter((m) => m.kind !== 'TEA_SNACKS'));
+      setTeaSnacksItems(data.filter((m) => m.kind === 'TEA_SNACKS'));
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setMenuLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { refreshMenu(); }, [refreshMenu]);
+
+  const addMenuItem = async (item: { name: string; price: number; category: string; kind?: 'FOOD' | 'TEA_SNACKS' }) => {
+    const res = await fetch('/api/menu', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ kind: 'FOOD', ...item }),
+    });
+    const data = await res.json();
+    if (!res.ok) { toast.error(data?.error || 'Could not add item'); return; }
+    await refreshMenu();
     toast.success(`${item.name} added to menu!`);
   };
 
-  const updateMenuItem = (id: string, updates: Partial<Omit<MenuItem, 'id'>>) => {
-    setMenuItems(prev => prev.map(m => m.id === id ? { ...m, ...updates } : m));
+  const updateMenuItem = async (id: string, updates: Partial<Pick<MenuItem, 'name' | 'price' | 'category'>>) => {
+    const res = await fetch(`/api/menu/${id}`, {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(updates),
+    });
+    const data = await res.json();
+    if (!res.ok) { toast.error(data?.error || 'Could not update item'); return; }
+    await refreshMenu();
     toast.success('Item updated');
   };
 
-  const deleteMenuItem = (id: string) => {
-    setMenuItems(prev => prev.filter(m => m.id !== id));
+  const deleteMenuItem = async (id: string) => {
+    const res = await fetch(`/api/menu/${id}`, { method: 'DELETE' });
+    const data = await res.json();
+    if (!res.ok) { toast.error(data?.error || 'Could not remove item'); return; }
+    await refreshMenu();
     toast.success('Item removed');
   };
 
-  const addToHistory = (entry: OrderHistoryEntry) => {
-    setOrderHistory(prev => [entry, ...prev]);
-  };
+  // ---- Orders (from API, polled) ----
+  const readyNotified = useRef<Set<string>>(new Set());
 
-  // Generic order helpers
-  const getSetterForKey = (key: string) => {
-    if (key.startsWith('TAKE-')) return setTakeAwayOrders;
-    if (key.startsWith('TS-')) return setTeaSnacksOrders;
-    return setOrders;
-  };
+  const refreshOrders = useCallback(async () => {
+    try {
+      const res = await fetch('/api/orders?active=1', { cache: 'no-store' });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error || 'Failed to load orders');
+      const mapped: TableOrder[] = data.map(mapOrder);
+      setActiveOrders(mapped);
 
-  const addItemToTable = (tableNumber: number, item: MenuItem) => {
-    const key = `table_${tableNumber}`;
-    setOrders(prev => {
-      const existing = prev[key];
-      if (existing) {
-        const existingItem = existing.items.find(i => i.menuItem.id === item.id);
-        if (existingItem) {
-          return { ...prev, [key]: { ...existing, items: existing.items.map(i => i.menuItem.id === item.id ? { ...i, quantity: i.quantity + 1 } : i) } };
+      // Notify when an order becomes fully ready (kitchen done -> inform table).
+      const currentReady = new Set<string>();
+      mapped.forEach((o) => {
+        if (o.orderId && isOrderReady(o)) {
+          currentReady.add(o.orderId);
+          if (!readyNotified.current.has(o.orderId)) {
+            readyNotified.current.add(o.orderId);
+            const label = o.type === 'DINE_IN' ? `Table ${o.tableNumber}` : (o.orderNo || o.orderId);
+            playReadySound();
+            toast.success('Order ready to serve!', { description: label });
+          }
         }
-        return { ...prev, [key]: { ...existing, items: [...existing.items, { menuItem: item, quantity: 1, status: 'added' }] } };
-      }
-      return { ...prev, [key]: { tableNumber, items: [{ menuItem: item, quantity: 1, status: 'added' }], paymentStatus: 'pending', createdAt: new Date(), type: 'DINE_IN' } };
-    });
-    playOrderSound();
-    toast.success(`${item.name} added to Table ${tableNumber}`);
-  };
-
-  const removeItemFromTable = (tableKey: string, itemId: string) => {
-    const setter = getSetterForKey(tableKey);
-    setter(prev => {
-      const existing = prev[tableKey];
-      if (!existing) return prev;
-      const filtered = existing.items.filter(i => i.menuItem.id !== itemId);
-      if (filtered.length === 0) { const { [tableKey]: _, ...rest } = prev; return rest; }
-      return { ...prev, [tableKey]: { ...existing, items: filtered } };
-    });
-  };
-
-  const updateItemQuantity = (tableKey: string, itemId: string, quantity: number) => {
-    if (quantity <= 0) { removeItemFromTable(tableKey, itemId); return; }
-    const setter = getSetterForKey(tableKey);
-    setter(prev => {
-      const existing = prev[tableKey];
-      if (!existing) return prev;
-      return { ...prev, [tableKey]: { ...existing, items: existing.items.map(i => i.menuItem.id === itemId ? { ...i, quantity } : i) } };
-    });
-  };
-
-  const updateItemStatus = (tableKey: string, itemId: string, status: OrderItem['status']) => {
-    const setter = getSetterForKey(tableKey);
-    setter(prev => {
-      const existing = prev[tableKey];
-      if (!existing) return prev;
-      return { ...prev, [tableKey]: { ...existing, items: existing.items.map(i => i.menuItem.id === itemId ? { ...i, status } : i) } };
-    });
-    if (status === 'ready' || status === 'completed') {
-      playReadySound();
-      toast.success(`Order is ${status}!`, { description: tableKey.startsWith('TAKE-') ? tableKey : tableKey.startsWith('TS-') ? tableKey : `Table ${tableKey.replace('table_', '')}` });
+      });
+      readyNotified.current.forEach((id) => { if (!currentReady.has(id)) readyNotified.current.delete(id); });
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setOrdersLoading(false);
     }
+  }, [playReadySound]);
+
+  useEffect(() => {
+    refreshOrders();
+    const t = setInterval(refreshOrders, POLL_MS);
+    return () => clearInterval(t);
+  }, [refreshOrders]);
+
+  const getTableOrder = useCallback(
+    (tableNumber: number) =>
+      activeOrders.find((o) => o.type === 'DINE_IN' && o.tableNumber === tableNumber),
+    [activeOrders]
+  );
+
+  const placeOrder: RestaurantContextType['placeOrder'] = async ({ type, tableNumber = 0, items }) => {
+    if (items.length === 0) { toast.error('Add at least one item'); return null; }
+    const res = await fetch('/api/orders', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        type, tableNumber,
+        items: items.map((c) => ({
+          menuItemId: c.menuItem.id, name: c.menuItem.name, price: c.menuItem.price,
+          category: c.menuItem.category, quantity: c.quantity,
+        })),
+      }),
+    });
+    const data = await res.json();
+    if (!res.ok) { toast.error(data?.error || 'Could not send order'); return null; }
+    playOrderSound();
+    const label = type === 'DINE_IN' ? `Table ${tableNumber}` : (data.orderNo || 'order');
+    toast.success(`Sent to kitchen — ${label}`);
+    await refreshOrders();
+    return mapOrder(data);
   };
 
-  const clearTable = (tableKey: string) => {
-    const setter = getSetterForKey(tableKey);
-    // Save to history before clearing
-    const allOrderSources = { ...orders, ...takeAwayOrders, ...teaSnacksOrders };
-    const order = allOrderSources[tableKey];
-    if (order && order.items.length > 0) {
+  const updateItemStatus = async (orderId: string, menuItemId: string, status: OrderItem['status']) => {
+    const res = await fetch(`/api/orders/${orderId}`, {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ itemStatuses: [{ menuItemId, status }] }),
+    });
+    if (!res.ok) { const d = await res.json().catch(() => ({})); toast.error(d?.error || 'Update failed'); return; }
+    await refreshOrders();
+  };
+
+  const updateItemQuantity = async (orderId: string, menuItemId: string, quantity: number) => {
+    const res = await fetch(`/api/orders/${orderId}`, {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ itemQuantities: [{ menuItemId, quantity }] }),
+    });
+    if (!res.ok) { const d = await res.json().catch(() => ({})); toast.error(d?.error || 'Update failed'); return; }
+    await refreshOrders();
+  };
+
+  const markPaid = async (orderId: string) => {
+    const res = await fetch(`/api/orders/${orderId}`, {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ paymentStatus: 'paid' }),
+    });
+    if (!res.ok) { const d = await res.json().catch(() => ({})); toast.error(d?.error || 'Update failed'); return; }
+    toast.success('Payment received!');
+    await refreshOrders();
+  };
+
+  const addToHistory = (entry: OrderHistoryEntry) => setOrderHistory((prev) => [entry, ...prev]);
+
+  const clearOrder = async (order: TableOrder) => {
+    if (!order.orderId) return;
+    if (order.items.length > 0) {
       const total = order.items.reduce((s, i) => s + i.menuItem.price * i.quantity, 0);
       addToHistory({
-        orderId: order.orderId || tableKey,
+        orderId: order.orderNo || order.orderId,
         type: order.type,
-        items: order.items.map(i => ({ name: i.menuItem.name, quantity: i.quantity, price: i.menuItem.price })),
+        items: order.items.map((i) => ({ name: i.menuItem.name, quantity: i.quantity, price: i.menuItem.price })),
         total,
         timestamp: new Date().toISOString(),
         tableNumber: order.tableNumber || undefined,
       });
     }
-    setter(prev => { const { [tableKey]: _, ...rest } = prev; return rest; });
+    const res = await fetch(`/api/orders/${order.orderId}`, { method: 'DELETE' });
+    if (!res.ok) { const d = await res.json().catch(() => ({})); toast.error(d?.error || 'Could not clear'); return; }
+    await refreshOrders();
   };
 
-  const markTablePaid = (tableKey: string) => {
-    const setter = getSetterForKey(tableKey);
-    setter(prev => {
-      const existing = prev[tableKey];
-      if (!existing) return prev;
-      return { ...prev, [tableKey]: { ...existing, paymentStatus: 'paid' } };
-    });
-    toast.success('Payment received!');
-  };
-
-  const getActiveOrders = () => {
-    return [...Object.values(orders), ...Object.values(takeAwayOrders), ...Object.values(teaSnacksOrders)].filter(o => o.items.length > 0);
-  };
-
-  // Take Away
-  const createTakeAwayOrder = () => {
-    const num = takeAwayCounter + 1;
-    setTakeAwayCounter(num);
-    const orderId = generateOrderId('TAKE', num);
-    setTakeAwayOrders(prev => ({
-      ...prev,
-      [orderId]: { tableNumber: 0, orderId, items: [], paymentStatus: 'pending', createdAt: new Date(), type: 'TAKE_AWAY' },
-    }));
-    return orderId;
-  };
-
-  const addItemToTakeAway = (orderId: string, item: MenuItem) => {
-    setTakeAwayOrders(prev => {
-      const existing = prev[orderId];
-      if (!existing) return prev;
-      const existingItem = existing.items.find(i => i.menuItem.id === item.id);
-      if (existingItem) {
-        return { ...prev, [orderId]: { ...existing, items: existing.items.map(i => i.menuItem.id === item.id ? { ...i, quantity: i.quantity + 1 } : i) } };
-      }
-      return { ...prev, [orderId]: { ...existing, items: [...existing.items, { menuItem: item, quantity: 1, status: 'added' }] } };
-    });
-    playOrderSound();
-    toast.success(`${item.name} added to ${orderId}`);
-  };
-
-  const removeItemFromTakeAway = (orderId: string, itemId: string) => removeItemFromTable(orderId, itemId);
-  const updateTakeAwayItemQuantity = (orderId: string, itemId: string, quantity: number) => updateItemQuantity(orderId, itemId, quantity);
-
-  // Tea & Snacks
-  const createTeaSnacksOrder = () => {
-    const num = teaSnacksCounter + 1;
-    setTeaSnacksCounter(num);
-    const orderId = generateOrderId('TS', num);
-    setTeaSnacksOrders(prev => ({
-      ...prev,
-      [orderId]: { tableNumber: 0, orderId, items: [], paymentStatus: 'pending', createdAt: new Date(), type: 'TEA_SNACKS' },
-    }));
-    return orderId;
-  };
-
-  const addItemToTeaSnacks = (orderId: string, item: MenuItem) => {
-    setTeaSnacksOrders(prev => {
-      const existing = prev[orderId];
-      if (!existing) return prev;
-      const existingItem = existing.items.find(i => i.menuItem.id === item.id);
-      if (existingItem) {
-        return { ...prev, [orderId]: { ...existing, items: existing.items.map(i => i.menuItem.id === item.id ? { ...i, quantity: i.quantity + 1 } : i) } };
-      }
-      return { ...prev, [orderId]: { ...existing, items: [...existing.items, { menuItem: item, quantity: 1, status: 'added' }] } };
-    });
-    playOrderSound();
-    toast.success(`${item.name} added to ${orderId}`);
-  };
-
-  const removeItemFromTeaSnacks = (orderId: string, itemId: string) => removeItemFromTable(orderId, itemId);
-  const updateTeaSnacksItemQuantity = (orderId: string, itemId: string, quantity: number) => updateItemQuantity(orderId, itemId, quantity);
-
-  // Auth
+  // ---- Auth / settings / invoice ----
   const authenticateCounter = (pin: string) => {
     if (pin === counterPin) {
       setIsCounterAuthenticated(true);
@@ -445,45 +368,34 @@ export const RestaurantProvider: React.FC<{ children: ReactNode }> = ({ children
     toast.error('Invalid PIN');
     return false;
   };
-
   const logoutCounter = () => {
     setIsCounterAuthenticated(false);
     sessionStorage.removeItem('kadali_counter_auth');
   };
-
   const changePin = (currentPin: string, newPin: string) => {
-    if (currentPin !== counterPin) {
-      toast.error('Current PIN is incorrect');
-      return false;
-    }
-    if (newPin.length !== 4 || !/^\d{4}$/.test(newPin)) {
-      toast.error('PIN must be 4 digits');
-      return false;
-    }
+    if (currentPin !== counterPin) { toast.error('Current PIN is incorrect'); return false; }
+    if (!/^\d{4}$/.test(newPin)) { toast.error('PIN must be 4 digits'); return false; }
     setCounterPin(newPin);
     toast.success('PIN changed successfully!');
     return true;
   };
-
   const updateSettings = (s: Partial<RestaurantSettings>) => {
-    setSettings(prev => ({ ...prev, ...s }));
+    setSettings((prev) => ({ ...prev, ...s }));
     toast.success('Settings updated!');
   };
-
   const getNextInvoice = () => {
     const inv = `INV-${String(nextInvoiceNumber).padStart(4, '0')}`;
-    setNextInvoiceNumber(prev => prev + 1);
+    setNextInvoiceNumber((prev) => prev + 1);
     return inv;
   };
 
   return (
     <RestaurantContext.Provider value={{
-      menuItems, addMenuItem, updateMenuItem, deleteMenuItem, tables, orders,
-      addItemToTable, removeItemFromTable, updateItemQuantity,
-      updateItemStatus, clearTable, markTablePaid,
-      getActiveOrders, isCounterAuthenticated, authenticateCounter, logoutCounter, changePin,
-      takeAwayOrders, createTakeAwayOrder, addItemToTakeAway, removeItemFromTakeAway, updateTakeAwayItemQuantity,
-      teaSnacksItems: defaultTeaSnacksItems, teaSnacksOrders, createTeaSnacksOrder, addItemToTeaSnacks, removeItemFromTeaSnacks, updateTeaSnacksItemQuantity,
+      menuItems, teaSnacksItems, menuLoading, addMenuItem, updateMenuItem, deleteMenuItem,
+      tables,
+      activeOrders, ordersLoading, getTableOrder, refreshOrders, placeOrder,
+      updateItemStatus, updateItemQuantity, markPaid, clearOrder,
+      isCounterAuthenticated, authenticateCounter, logoutCounter, changePin,
       settings, updateSettings, playOrderSound, playReadySound,
       nextInvoiceNumber, getNextInvoice,
       orderHistory, addToHistory,

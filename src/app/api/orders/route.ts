@@ -12,7 +12,9 @@ export async function GET(request: Request) {
     await connectDB();
     const sp = new URL(request.url).searchParams;
     const filter: Record<string, unknown> = {};
-    if (sp.get("active") !== "0") filter.status = "active";
+    const status = sp.get("status");
+    if (status) filter.status = status; // explicit: active | cleared
+    else if (sp.get("active") !== "0") filter.status = "active";
     const type = sp.get("type");
     if (type) filter.type = type;
     const table = sp.get("table");

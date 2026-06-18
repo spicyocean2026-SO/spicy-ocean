@@ -2,25 +2,35 @@
 
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Search, ArrowLeft, Minus, Plus, ShoppingCart, Trash2, Send, Loader2 } from 'lucide-react';
+import { Search, ArrowLeft, Minus, Plus, ShoppingCart, Trash2, Send, Loader2, FileText, DoorOpen, Check } from 'lucide-react';
+import { toast } from 'sonner';
 import { useRestaurant, CartLine, MenuItem, TableOrder } from '@/context/RestaurantContext';
 import TableCard from '@/components/TableCard';
 import FoodItemCard from '@/components/FoodItemCard';
-import OrderCard from '@/components/OrderCard';
+import BillModal from '@/components/BillModal';
 
 const categories = ['All', 'Soups', 'Starters', 'Biriyani', 'Cocktails'];
 
 const orderReady = (o?: TableOrder) =>
   !!o && o.items.length > 0 && o.items.every((i) => i.status === 'ready' || i.status === 'completed');
 
+const SENT_STATUS: Record<string, { label: string; cls: string }> = {
+  added: { label: 'Pending', cls: 'bg-highlight text-highlight-foreground' },
+  cooking: { label: 'Cooking', cls: 'bg-primary text-primary-foreground' },
+  ready: { label: 'Ready', cls: 'bg-success text-success-foreground' },
+  completed: { label: 'Served', cls: 'bg-muted text-muted-foreground' },
+};
+
 const DineInPage: React.FC = () => {
-  const { tables, menuItems, menuLoading, getTableOrder, placeOrder, settings } = useRestaurant();
+  const { tables, menuItems, menuLoading, getTableOrder, placeOrder, clearOrder, updateItemStatus, getNextInvoice, settings } = useRestaurant();
   const [selectedTable, setSelectedTable] = useState<number | null>(null);
   const [activeCategory, setActiveCategory] = useState('All');
   const [search, setSearch] = useState('');
   const [showCart, setShowCart] = useState(false);
   const [cart, setCart] = useState<CartLine[]>([]);
   const [sending, setSending] = useState(false);
+  const [closing, setClosing] = useState(false);
+  const [bill, setBill] = useState<{ order: TableOrder; invoice: string } | null>(null);
 
   const filteredItems = menuItems.filter((item) => {
     const matchCategory = activeCategory === 'All' || item.category === activeCategory;
@@ -52,6 +62,29 @@ const DineInPage: React.FC = () => {
     const res = await placeOrder({ type: 'DINE_IN', tableNumber: selectedTable, items: cart });
     setSending(false);
     if (res) { setCart([]); setShowCart(false); }
+  };
+
+  const handleClose = async (order: TableOrder) => {
+    const beingPrepared = order.items.some((i) => i.status === 'added' || i.status === 'cooking');
+    const notServed = order.items.some((i) => i.status === 'ready');
+    if (beingPrepared) {
+      toast.error('Cannot close — some items are still being prepared in the kitchen.');
+      return;
+    }
+    if (notServed) {
+      toast.error('Cannot close — mark all ready items as Served first.');
+      return;
+    }
+    if (!window.confirm(`Close Table ${selectedTable} and free it for new orders?`)) return;
+    setClosing(true);
+    await clearOrder(order);
+    setClosing(false);
+    setCart([]);
+    setSelectedTable(null);
+  };
+
+  const serveItem = (order: TableOrder, menuItemId: string) => {
+    if (order.orderId) updateItemStatus(order.orderId, menuItemId, 'completed');
   };
 
   // ---- Table selection screen ----
@@ -138,8 +171,35 @@ const DineInPage: React.FC = () => {
             {/* Already sent to kitchen */}
             {sentOrder && sentOrder.items.length > 0 && (
               <div>
-                <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1">Sent to kitchen</p>
-                {sentOrder.items.map((item) => <OrderCard key={item.menuItem.id} item={item} />)}
+                <div className="flex items-center justify-between mb-1">
+                  <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Sent to kitchen</p>
+                  {sentOrder.items.some((i) => i.status === 'ready') && (
+                    <button
+                      onClick={() => sentOrder.items.forEach((i) => i.status === 'ready' && serveItem(sentOrder, i.menuItem.id))}
+                      className="text-[11px] font-medium text-success hover:underline">
+                      Serve all ready
+                    </button>
+                  )}
+                </div>
+                {sentOrder.items.map((item) => {
+                  const st = SENT_STATUS[item.status] ?? SENT_STATUS.added;
+                  return (
+                    <div key={item.menuItem.id} className="flex items-center justify-between gap-3 py-2 border-b border-border last:border-0">
+                      <div className="min-w-0">
+                        <p className="text-sm font-medium text-foreground truncate">{item.menuItem.name}</p>
+                        <p className="text-xs text-muted-foreground">×{item.quantity} · ₹{item.menuItem.price * item.quantity}</p>
+                      </div>
+                      {item.status === 'ready' ? (
+                        <button onClick={() => serveItem(sentOrder, item.menuItem.id)}
+                          className="px-3 py-1.5 rounded-lg bg-success text-success-foreground text-xs font-medium flex items-center gap-1 flex-shrink-0">
+                          <Check className="w-3.5 h-3.5" /> Serve
+                        </button>
+                      ) : (
+                        <span className={`text-[10px] px-2 py-1 rounded-md font-medium capitalize flex-shrink-0 ${st.cls}`}>{st.label}</span>
+                      )}
+                    </div>
+                  );
+                })}
               </div>
             )}
 
@@ -177,8 +237,34 @@ const DineInPage: React.FC = () => {
               </button>
             </div>
           )}
+
+          {/* Checkout / free the table once customers are done */}
+          {sentOrder && sentOrder.items.length > 0 && (
+            <div className="p-4 border-t border-border space-y-3">
+              <div className="flex justify-between text-base font-bold">
+                <span className="text-foreground">Order Total</span>
+                <span className="text-primary">
+                  ₹{(sentOrder.items.reduce((s, i) => s + i.menuItem.price * i.quantity, 0) * (1 + settings.taxPercent / 100)).toFixed(0)}
+                </span>
+              </div>
+              <div className="flex gap-2">
+                <button onClick={() => setBill({ order: sentOrder, invoice: getNextInvoice() })}
+                  className="flex-1 py-2.5 rounded-xl bg-muted text-foreground font-medium text-sm flex items-center justify-center gap-2 hover:bg-muted/70 transition-colors">
+                  <FileText className="w-4 h-4" /> Bill
+                </button>
+                <button onClick={() => handleClose(sentOrder)} disabled={closing}
+                  className="flex-1 py-2.5 rounded-xl bg-destructive/10 text-destructive font-medium text-sm flex items-center justify-center gap-2 hover:bg-destructive/20 transition-colors disabled:opacity-60">
+                  {closing ? <Loader2 className="w-4 h-4 animate-spin" /> : <DoorOpen className="w-4 h-4" />} Close & Free
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       </div>
+
+      <AnimatePresence>
+        {bill && <BillModal order={bill.order} invoiceNumber={bill.invoice} onClose={() => setBill(null)} />}
+      </AnimatePresence>
     </div>
   );
 };

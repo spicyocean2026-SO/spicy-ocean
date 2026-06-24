@@ -20,6 +20,22 @@ function mapOrder(o: any): TableOrder {
 const labelFor = (o: TableOrder) => o.type === 'DINE_IN' ? `Table ${o.tableNumber}` : (o.orderNo || o.orderId || '');
 const getTypeLabel = (t: string) => t === 'TAKE_AWAY' ? 'Take Away' : t === 'TEA_SNACKS' ? 'Tea & Snacks' : 'Dine-In';
 
+type ClosedPeriod = 'today' | 'week' | 'month' | 'all';
+const CLOSED_PERIODS: { id: ClosedPeriod; label: string }[] = [
+  { id: 'today', label: 'Today' },
+  { id: 'week', label: 'This Week' },
+  { id: 'month', label: 'This Month' },
+  { id: 'all', label: 'All' },
+];
+function closedFrom(period: ClosedPeriod): Date | null {
+  if (period === 'all') return null;
+  const now = new Date();
+  const startToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  if (period === 'today') return startToday;
+  if (period === 'week') { const d = new Date(startToday); d.setDate(d.getDate() - d.getDay()); return d; }
+  return new Date(now.getFullYear(), now.getMonth(), 1);
+}
+
 const CounterPage: React.FC = () => {
   const {
     isCounterAuthenticated, authenticateCounter, logoutCounter,
@@ -30,19 +46,22 @@ const CounterPage: React.FC = () => {
   const [bill, setBill] = useState<{ order: TableOrder; invoice: string } | null>(null);
   const [closed, setClosed] = useState<TableOrder[]>([]);
   const [closedLoading, setClosedLoading] = useState(false);
+  const [closedPeriod, setClosedPeriod] = useState<ClosedPeriod>('today');
 
   const tax = settings.taxPercent;
 
   const fetchClosed = useCallback(async () => {
     setClosedLoading(true);
     try {
-      const res = await fetch('/api/orders?status=cleared', { cache: 'no-store' });
+      const from = closedFrom(closedPeriod);
+      const qs = from ? `&from=${encodeURIComponent(from.toISOString())}` : '';
+      const res = await fetch(`/api/orders?status=cleared${qs}`, { cache: 'no-store' });
       const data = await res.json();
       if (res.ok) setClosed((data as any[]).map(mapOrder).sort((a, b) => +new Date(b.createdAt) - +new Date(a.createdAt)));
     } finally {
       setClosedLoading(false);
     }
-  }, []);
+  }, [closedPeriod]);
 
   useEffect(() => { if (isCounterAuthenticated && activeTab === 'closed') fetchClosed(); }, [activeTab, isCounterAuthenticated, fetchClosed]);
 
@@ -166,6 +185,15 @@ const CounterPage: React.FC = () => {
 
       {activeTab === 'closed' && (
         <div className="space-y-3">
+          <div className="flex gap-2 flex-wrap">
+            {CLOSED_PERIODS.map((p) => (
+              <button key={p.id} onClick={() => setClosedPeriod(p.id)}
+                className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${closedPeriod === p.id ? 'gradient-primary text-primary-foreground' : 'bg-muted text-muted-foreground'}`}>
+                {p.label}
+              </button>
+            ))}
+            {!closedLoading && <span className="ml-auto text-sm text-muted-foreground self-center">{closed.length} order{closed.length !== 1 ? 's' : ''}</span>}
+          </div>
           {closedLoading ? (
             <div className="flex items-center justify-center py-16 text-muted-foreground"><Loader2 className="w-5 h-5 animate-spin mr-2" /> Loading…</div>
           ) : closed.length === 0 ? (

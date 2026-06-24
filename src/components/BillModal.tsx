@@ -141,7 +141,10 @@ td { padding:3px 0; vertical-align:top; }
             </div>
           </div>
 
-          <div className="flex gap-2 p-3 border-t border-neutral-200 bg-neutral-50">
+          <div className="flex gap-2 p-3 border-t border-neutral-200 bg-neutral-50 sticky bottom-0">
+            <button onClick={onClose} className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-neutral-200 text-neutral-800 font-semibold text-sm hover:bg-neutral-300">
+              <X className="w-4 h-4" /> Close
+            </button>
             <button onClick={handlePrint} className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl bg-black text-white font-semibold text-sm hover:bg-neutral-800">
               <Printer className="w-4 h-4" /> Print Bill
             </button>

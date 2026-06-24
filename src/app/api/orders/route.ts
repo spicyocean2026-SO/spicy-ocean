@@ -23,6 +23,8 @@ export async function GET(request: Request) {
     if (type) filter.type = type;
     const table = sp.get("table");
     if (table) filter.tableNumber = Number(table);
+    const from = sp.get("from");
+    if (from) filter.createdAt = { $gte: new Date(from) };
 
     const orders = await Order.find(filter as any).sort({ createdAt: 1 });
     return NextResponse.json(orders.map(serializeOrder));

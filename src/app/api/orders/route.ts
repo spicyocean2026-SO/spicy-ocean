@@ -3,6 +3,7 @@ import { z } from "zod";
 import { connectDB } from "@/lib/mongodb";
 import { Order, makeOrderNo, serializeOrder } from "@/models/Order";
 import { publishOrdersChanged } from "@/lib/ably";
+import { requireRole } from "@/lib/session";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -10,6 +11,8 @@ export const dynamic = "force-dynamic";
 // GET /api/orders?active=1&type=DINE_IN&table=1 — list orders (active by default).
 export async function GET(request: Request) {
   try {
+    const auth = await requireRole();
+    if ("response" in auth) return auth.response;
     await connectDB();
     const sp = new URL(request.url).searchParams;
     const filter: Record<string, unknown> = {};
@@ -49,6 +52,8 @@ const createSchema = z.object({
 // table's existing active dine-in order so a table has a single running bill.
 export async function POST(request: Request) {
   try {
+    const auth = await requireRole();
+    if ("response" in auth) return auth.response;
     const parsed = createSchema.safeParse(await request.json());
     if (!parsed.success) {
       return NextResponse.json(

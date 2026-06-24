@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { connectDB } from "@/lib/mongodb";
 import { Profile, DEFAULT_PROFILE } from "@/models/Profile";
+import { requireRole } from "@/lib/session";
 
 // Mongoose needs the Node.js runtime, and this data must never be cached.
 export const runtime = "nodejs";
@@ -20,6 +21,8 @@ function serialize(doc: any) {
 // GET /api/profile — returns the singleton profile, seeding defaults on first use.
 export async function GET() {
   try {
+    const auth = await requireRole();
+    if ("response" in auth) return auth.response;
     await connectDB();
     let doc = await Profile.findOne({ key: "primary" });
     if (!doc) {
@@ -46,6 +49,8 @@ const updateSchema = z.object({
 // PUT /api/profile — upserts the singleton profile.
 export async function PUT(request: Request) {
   try {
+    const auth = await requireRole();
+    if ("response" in auth) return auth.response;
     const body = await request.json();
     const parsed = updateSchema.safeParse(body);
     if (!parsed.success) {

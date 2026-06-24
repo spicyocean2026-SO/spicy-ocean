@@ -6,6 +6,7 @@ import {
   DEFAULT_FOOD_ITEMS,
   DEFAULT_TEA_SNACKS_ITEMS,
 } from "@/models/MenuItem";
+import { requireRole } from "@/lib/session";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -23,6 +24,8 @@ function serialize(doc: any) {
 // GET /api/menu?kind=FOOD|TEA_SNACKS — list items, seeding defaults on first use.
 export async function GET(request: Request) {
   try {
+    const auth = await requireRole();
+    if ("response" in auth) return auth.response;
     await connectDB();
     const count = await MenuItem.estimatedDocumentCount();
     if (count === 0) {
@@ -50,6 +53,8 @@ const createSchema = z.object({
 // POST /api/menu — add a menu item.
 export async function POST(request: Request) {
   try {
+    const auth = await requireRole(["owner"]);
+    if ("response" in auth) return auth.response;
     const parsed = createSchema.safeParse(await request.json());
     if (!parsed.success) {
       return NextResponse.json(

@@ -3,6 +3,7 @@ import { z } from "zod";
 import { connectDB } from "@/lib/mongodb";
 import { Order, ITEM_STATUSES, serializeOrder } from "@/models/Order";
 import { publishOrdersChanged } from "@/lib/ably";
+import { requireRole } from "@/lib/session";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -10,6 +11,8 @@ export const dynamic = "force-dynamic";
 // GET /api/orders/[id] — single order (used by a table to poll its status).
 export async function GET(_request: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
+    const auth = await requireRole();
+    if ("response" in auth) return auth.response;
     const { id } = await params;
     await connectDB();
     const order = await Order.findById(id);
@@ -35,6 +38,8 @@ const patchSchema = z.object({
 // PATCH /api/orders/[id] — update item statuses, quantities, or payment.
 export async function PATCH(request: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
+    const auth = await requireRole();
+    if ("response" in auth) return auth.response;
     const { id } = await params;
     const parsed = patchSchema.safeParse(await request.json());
     if (!parsed.success) {
@@ -80,6 +85,8 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
 // DELETE /api/orders/[id] — clear the order from active lists (soft, keeps record).
 export async function DELETE(_request: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
+    const auth = await requireRole();
+    if ("response" in auth) return auth.response;
     const { id } = await params;
     await connectDB();
     const order = await Order.findByIdAndUpdate(id, { $set: { status: "cleared" } }, { new: true });

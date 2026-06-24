@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { connectDB } from "@/lib/mongodb";
 import { MenuItem } from "@/models/MenuItem";
+import { requireRole } from "@/lib/session";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -19,6 +20,8 @@ const updateSchema = z.object({
 // PATCH /api/menu/[id] — update a menu item.
 export async function PATCH(request: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
+    const auth = await requireRole(["owner"]);
+    if ("response" in auth) return auth.response;
     const { id } = await params;
     const parsed = updateSchema.safeParse(await request.json());
     if (!parsed.success) {
@@ -40,6 +43,8 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
 // DELETE /api/menu/[id] — remove a menu item.
 export async function DELETE(_request: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
+    const auth = await requireRole(["owner"]);
+    if ("response" in auth) return auth.response;
     const { id } = await params;
     await connectDB();
     const doc = await MenuItem.findByIdAndDelete(id);

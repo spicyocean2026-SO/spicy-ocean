@@ -26,6 +26,7 @@ const UserSchema = new mongoose.Schema(
   {
     username: { type: String, required: true, unique: true, trim: true, lowercase: true },
     passwordHash: { type: String, required: true },
+    role: { type: String, enum: ["owner", "cashier", "server", "kitchen"], default: "server" },
   },
   { timestamps: true }
 );
@@ -61,10 +62,10 @@ async function main() {
   const passwordHash = await bcrypt.hash(TEST_USER.password, 10);
   await User.findOneAndUpdate(
     { username: TEST_USER.username },
-    { $set: { passwordHash }, $setOnInsert: { username: TEST_USER.username } },
+    { $set: { passwordHash, role: "owner" }, $setOnInsert: { username: TEST_USER.username } },
     { upsert: true, new: true }
   );
-  console.log(`✓ Test user ready -> username: ${TEST_USER.username} / password: ${TEST_USER.password}`);
+  console.log(`✓ Test user ready -> username: ${TEST_USER.username} / password: ${TEST_USER.password} (role: owner)`);
 
   await Profile.findOneAndUpdate(
     { key: "primary" },

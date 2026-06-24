@@ -26,6 +26,7 @@ export interface TableOrder {
   paymentStatus: 'pending' | 'paid';
   createdAt: string | Date;
   type: 'DINE_IN' | 'TAKE_AWAY' | 'TEA_SNACKS';
+  tableFreed?: boolean;
 }
 
 export interface OrderHistoryEntry {
@@ -68,7 +69,9 @@ interface RestaurantContextType {
   updateItemStatus: (orderId: string, menuItemId: string, status: OrderItem['status']) => Promise<void>;
   updateItemQuantity: (orderId: string, menuItemId: string, quantity: number) => Promise<void>;
   markPaid: (orderId: string) => Promise<void>;
+  freeTable: (order: TableOrder) => Promise<void>;
   clearOrder: (order: TableOrder) => Promise<void>;
+  currentRole?: string;
 
   // Counter auth
   isCounterAuthenticated: boolean;
@@ -95,8 +98,6 @@ interface RestaurantContextType {
 
 const RestaurantContext = createContext<RestaurantContextType | undefined>(undefined);
 
-const POLL_MS = 4000;
-
 // Map an API order into the UI TableOrder shape.
 function mapOrder(o: any): TableOrder {
   return {
@@ -106,6 +107,7 @@ function mapOrder(o: any): TableOrder {
     paymentStatus: o.paymentStatus,
     createdAt: o.createdAt,
     type: o.type,
+    tableFreed: !!o.tableFreed,
     items: (o.items ?? []).map((i: any) => ({
       menuItem: i.menuItem,
       quantity: i.quantity,
@@ -124,6 +126,16 @@ export const RestaurantProvider: React.FC<{ children: ReactNode }> = ({ children
 
   const [activeOrders, setActiveOrders] = useState<TableOrder[]>([]);
   const [ordersLoading, setOrdersLoading] = useState(true);
+
+  // Current user's role — drives which live notifications this browser shows.
+  const [currentRole, setCurrentRole] = useState<string | undefined>(undefined);
+  const roleRef = useRef<string | undefined>(undefined);
+  useEffect(() => {
+    fetch('/api/auth/me', { cache: 'no-store' })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => { const role = d?.user?.role; setCurrentRole(role); roleRef.current = role; })
+      .catch(() => {});
+  }, []);
 
   const tables = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
 
@@ -245,7 +257,11 @@ export const RestaurantProvider: React.FC<{ children: ReactNode }> = ({ children
   };
 
   // ---- Orders (from API, polled) ----
+  // Refs to detect transitions across polls and notify the right role once.
+  const firstLoad = useRef(true);
+  const addedSig = useRef<Map<string, number>>(new Map()); // orderId -> qty of 'added' items
   const readyNotified = useRef<Set<string>>(new Set());
+  const freedNotified = useRef<Set<string>>(new Set());
 
   const refreshOrders = useCallback(async () => {
     try {
@@ -255,36 +271,98 @@ export const RestaurantProvider: React.FC<{ children: ReactNode }> = ({ children
       const mapped: TableOrder[] = data.map(mapOrder);
       setActiveOrders(mapped);
 
-      // Notify when an order becomes fully ready (kitchen done -> inform table).
+      const role = roleRef.current;
+      const first = firstLoad.current;
+      const labelOf = (o: TableOrder) => (o.type === 'DINE_IN' ? `Table ${o.tableNumber}` : (o.orderNo || o.orderId || ''));
+
+      // KITCHEN: notify when new items are sent to the kitchen.
+      mapped.forEach((o) => {
+        if (!o.orderId) return;
+        const addedQty = o.items.filter((i) => i.status === 'added').reduce((s, i) => s + i.quantity, 0);
+        const prev = addedSig.current.get(o.orderId) ?? 0;
+        if (addedQty > prev && !first && role === 'kitchen') {
+          playOrderSound();
+          toast.info('New items to prepare', { description: labelOf(o) });
+        }
+        addedSig.current.set(o.orderId, addedQty);
+      });
+
+      // SERVER: notify when an order is fully ready to serve.
       const currentReady = new Set<string>();
       mapped.forEach((o) => {
         if (o.orderId && isOrderReady(o)) {
           currentReady.add(o.orderId);
           if (!readyNotified.current.has(o.orderId)) {
             readyNotified.current.add(o.orderId);
-            const label = o.type === 'DINE_IN' ? `Table ${o.tableNumber}` : (o.orderNo || o.orderId);
-            playReadySound();
-            toast.success('Order ready to serve!', { description: label });
+            if (!first && role === 'server') {
+              playReadySound();
+              toast.success('Order ready to serve!', { description: labelOf(o) });
+            }
           }
         }
       });
       readyNotified.current.forEach((id) => { if (!currentReady.has(id)) readyNotified.current.delete(id); });
+
+      // CASHIER: notify when a table is freed and awaiting payment.
+      const currentFreed = new Set<string>();
+      mapped.forEach((o) => {
+        if (o.orderId && o.tableFreed) {
+          currentFreed.add(o.orderId);
+          if (!freedNotified.current.has(o.orderId)) {
+            freedNotified.current.add(o.orderId);
+            if (!first && role === 'cashier') {
+              playReadySound();
+              toast.info('Table awaiting payment', { description: labelOf(o) });
+            }
+          }
+        }
+      });
+      freedNotified.current.forEach((id) => { if (!currentFreed.has(id)) freedNotified.current.delete(id); });
+
+      // Drop signatures for orders that are gone (so re-use notifies again).
+      const live = new Set(mapped.map((o) => o.orderId));
+      addedSig.current.forEach((_v, id) => { if (!live.has(id)) addedSig.current.delete(id); });
+
+      firstLoad.current = false;
     } catch (e) {
       console.error(e);
     } finally {
       setOrdersLoading(false);
     }
-  }, [playReadySound]);
+  }, [playReadySound, playOrderSound]);
 
+  // Realtime via Ably: refetch only when an order actually changes (no polling).
+  // Falls back gracefully if Ably isn't configured — own actions and tab-focus
+  // still refresh; cross-device live updates simply require the Ably key.
   useEffect(() => {
-    refreshOrders();
-    const t = setInterval(refreshOrders, POLL_MS);
-    return () => clearInterval(t);
+    refreshOrders(); // initial load
+
+    let client: any = null;
+    let cancelled = false;
+    (async () => {
+      try {
+        const Ably = (await import('ably')).default;
+        if (cancelled) return;
+        client = new Ably.Realtime({ authUrl: '/api/ably-token' });
+        client.channels.get('orders').subscribe('changed', () => { refreshOrders(); });
+      } catch (e) {
+        console.error('Ably init failed', e);
+      }
+    })();
+
+    const onVisible = () => { if (document.visibilityState === 'visible') refreshOrders(); };
+    document.addEventListener('visibilitychange', onVisible);
+
+    return () => {
+      cancelled = true;
+      document.removeEventListener('visibilitychange', onVisible);
+      try { client?.close(); } catch {}
+    };
   }, [refreshOrders]);
 
   const getTableOrder = useCallback(
     (tableNumber: number) =>
-      activeOrders.find((o) => o.type === 'DINE_IN' && o.tableNumber === tableNumber),
+      activeOrders.find((o) => o.type === 'DINE_IN' && o.tableNumber === tableNumber && !o.tableFreed),
     [activeOrders]
   );
 
@@ -334,6 +412,19 @@ export const RestaurantProvider: React.FC<{ children: ReactNode }> = ({ children
     });
     if (!res.ok) { const d = await res.json().catch(() => ({})); toast.error(d?.error || 'Update failed'); return; }
     toast.success('Payment received!');
+    await refreshOrders();
+  };
+
+  // Server frees the table: table becomes available, but the order stays open
+  // for the cashier to bill. Does NOT settle/close the order.
+  const freeTable = async (order: TableOrder) => {
+    if (!order.orderId) return;
+    const res = await fetch(`/api/orders/${order.orderId}`, {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tableFreed: true }),
+    });
+    if (!res.ok) { const d = await res.json().catch(() => ({})); toast.error(d?.error || 'Could not free table'); return; }
+    toast.success('Table freed — sent to cashier for billing');
     await refreshOrders();
   };
 
@@ -394,7 +485,7 @@ export const RestaurantProvider: React.FC<{ children: ReactNode }> = ({ children
       menuItems, teaSnacksItems, menuLoading, addMenuItem, updateMenuItem, deleteMenuItem,
       tables,
       activeOrders, ordersLoading, getTableOrder, refreshOrders, placeOrder,
-      updateItemStatus, updateItemQuantity, markPaid, clearOrder,
+      updateItemStatus, updateItemQuantity, markPaid, freeTable, clearOrder, currentRole,
       isCounterAuthenticated, authenticateCounter, logoutCounter, changePin,
       settings, updateSettings, playOrderSound, playReadySound,
       nextInvoiceNumber, getNextInvoice,

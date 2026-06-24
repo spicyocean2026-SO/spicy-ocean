@@ -11,6 +11,11 @@ const UserSchema = new Schema(
       minlength: 3,
     },
     passwordHash: { type: String, required: true },
+    role: {
+      type: String,
+      enum: ["owner", "cashier", "server", "kitchen"],
+      default: "server",
+    },
   },
   { timestamps: true }
 );

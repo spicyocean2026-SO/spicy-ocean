@@ -2,12 +2,11 @@
 
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Search, ArrowLeft, Minus, Plus, ShoppingCart, Trash2, Send, Loader2, FileText, DoorOpen, Check } from 'lucide-react';
+import { Search, ArrowLeft, Minus, Plus, ShoppingCart, Trash2, Send, Loader2, DoorOpen, Check } from 'lucide-react';
 import { toast } from 'sonner';
 import { useRestaurant, CartLine, MenuItem, TableOrder } from '@/context/RestaurantContext';
 import TableCard from '@/components/TableCard';
 import FoodItemCard from '@/components/FoodItemCard';
-import BillModal from '@/components/BillModal';
 
 const categories = ['All', 'Soups', 'Starters', 'Biriyani', 'Cocktails'];
 
@@ -22,7 +21,7 @@ const SENT_STATUS: Record<string, { label: string; cls: string }> = {
 };
 
 const DineInPage: React.FC = () => {
-  const { tables, menuItems, menuLoading, getTableOrder, placeOrder, clearOrder, updateItemStatus, getNextInvoice, settings } = useRestaurant();
+  const { tables, menuItems, menuLoading, getTableOrder, placeOrder, freeTable, updateItemStatus, settings } = useRestaurant();
   const [selectedTable, setSelectedTable] = useState<number | null>(null);
   const [activeCategory, setActiveCategory] = useState('All');
   const [search, setSearch] = useState('');
@@ -30,7 +29,6 @@ const DineInPage: React.FC = () => {
   const [cart, setCart] = useState<CartLine[]>([]);
   const [sending, setSending] = useState(false);
   const [closing, setClosing] = useState(false);
-  const [bill, setBill] = useState<{ order: TableOrder; invoice: string } | null>(null);
 
   const filteredItems = menuItems.filter((item) => {
     const matchCategory = activeCategory === 'All' || item.category === activeCategory;
@@ -75,9 +73,9 @@ const DineInPage: React.FC = () => {
       toast.error('Cannot close — mark all ready items as Served first.');
       return;
     }
-    if (!window.confirm(`Close Table ${selectedTable} and free it for new orders?`)) return;
+    if (!window.confirm(`Free Table ${selectedTable} for new customers? The bill stays open for the cashier to settle.`)) return;
     setClosing(true);
-    await clearOrder(order);
+    await freeTable(order);
     setClosing(false);
     setCart([]);
     setSelectedTable(null);
@@ -247,24 +245,15 @@ const DineInPage: React.FC = () => {
                   ₹{(sentOrder.items.reduce((s, i) => s + i.menuItem.price * i.quantity, 0) * (1 + settings.taxPercent / 100)).toFixed(0)}
                 </span>
               </div>
-              <div className="flex gap-2">
-                <button onClick={() => setBill({ order: sentOrder, invoice: getNextInvoice() })}
-                  className="flex-1 py-2.5 rounded-xl bg-muted text-foreground font-medium text-sm flex items-center justify-center gap-2 hover:bg-muted/70 transition-colors">
-                  <FileText className="w-4 h-4" /> Bill
-                </button>
-                <button onClick={() => handleClose(sentOrder)} disabled={closing}
-                  className="flex-1 py-2.5 rounded-xl bg-destructive/10 text-destructive font-medium text-sm flex items-center justify-center gap-2 hover:bg-destructive/20 transition-colors disabled:opacity-60">
-                  {closing ? <Loader2 className="w-4 h-4 animate-spin" /> : <DoorOpen className="w-4 h-4" />} Close & Free
-                </button>
-              </div>
+              <button onClick={() => handleClose(sentOrder)} disabled={closing}
+                className="w-full py-2.5 rounded-xl bg-destructive/10 text-destructive font-medium text-sm flex items-center justify-center gap-2 hover:bg-destructive/20 transition-colors disabled:opacity-60">
+                {closing ? <Loader2 className="w-4 h-4 animate-spin" /> : <DoorOpen className="w-4 h-4" />} Close &amp; Free Table
+              </button>
+              <p className="text-[11px] text-muted-foreground text-center">Frees the table · cashier settles the bill</p>
             </div>
           )}
         </div>
       </div>
-
-      <AnimatePresence>
-        {bill && <BillModal order={bill.order} invoiceNumber={bill.invoice} onClose={() => setBill(null)} />}
-      </AnimatePresence>
     </div>
   );
 };

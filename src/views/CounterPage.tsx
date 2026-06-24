@@ -146,6 +146,7 @@ const CounterPage: React.FC = () => {
                       {order.type === 'TEA_SNACKS' && <Coffee className="w-4 h-4 text-primary" />}
                       <h3 className="font-semibold text-foreground">{labelFor(order)}</h3>
                       <Badge className="text-xs bg-muted text-muted-foreground">{getTypeLabel(order.type)}</Badge>
+                      {order.tableFreed && <Badge className="text-xs bg-highlight text-highlight-foreground">Awaiting payment</Badge>}
                     </div>
                     <span className="font-bold text-primary">₹{(total * (1 + tax / 100)).toFixed(0)}</span>
                   </div>

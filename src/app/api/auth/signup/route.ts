@@ -11,6 +11,7 @@ const signupSchema = z.object({
   username: z.string().trim().toLowerCase().min(3, "Username must be at least 3 characters"),
   password: z.string().min(6, "Password must be at least 6 characters"),
   creationPassword: z.string().min(1, "Creation password is required"),
+  role: z.enum(["owner", "cashier", "server", "kitchen"]),
 });
 
 // POST /api/auth/signup — creates an account only if the creation password matches.
@@ -23,7 +24,7 @@ export async function POST(request: Request) {
         { status: 400 }
       );
     }
-    const { username, password, creationPassword } = parsed.data;
+    const { username, password, creationPassword, role } = parsed.data;
 
     const expected = process.env.SIGNUP_CODE;
     if (!expected) {
@@ -43,7 +44,7 @@ export async function POST(request: Request) {
     }
 
     const passwordHash = await bcrypt.hash(password, 10);
-    await User.create({ username, passwordHash });
+    await User.create({ username, passwordHash, role });
 
     return NextResponse.json({ ok: true });
   } catch (err) {

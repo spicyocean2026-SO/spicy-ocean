@@ -24,6 +24,9 @@ const OrderSchema = new Schema(
     paymentStatus: { type: String, enum: ["pending", "paid"], default: "pending" },
     // active = visible in kitchen/counter; cleared = settled/removed from active lists.
     status: { type: String, enum: ["active", "cleared"], default: "active", index: true },
+    // Server freed the table (available for new orders) but the order is still
+    // open and awaiting the cashier to bill/settle it.
+    tableFreed: { type: Boolean, default: false },
   },
   { timestamps: true }
 );
@@ -55,6 +58,7 @@ export function serializeOrder(doc: any) {
     tableNumber: doc.tableNumber,
     paymentStatus: doc.paymentStatus,
     status: doc.status,
+    tableFreed: !!doc.tableFreed,
     createdAt: doc.createdAt,
     items: (doc.items ?? []).map((i: any) => ({
       menuItem: {

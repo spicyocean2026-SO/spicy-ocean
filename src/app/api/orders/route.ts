@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { connectDB } from "@/lib/mongodb";
 import { Order, makeOrderNo, serializeOrder } from "@/models/Order";
+import { publishOrdersChanged } from "@/lib/ably";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -60,7 +61,8 @@ export async function POST(request: Request) {
 
     let order = null;
     if (type === "DINE_IN" && tableNumber > 0) {
-      order = await Order.findOne({ type: "DINE_IN", tableNumber, status: "active" });
+      // Only merge into the table's current (not-yet-freed) running order.
+      order = await Order.findOne({ type: "DINE_IN", tableNumber, status: "active", tableFreed: { $ne: true } });
     }
 
     if (order) {
@@ -80,6 +82,7 @@ export async function POST(request: Request) {
       });
     }
 
+    await publishOrdersChanged({ action: "create", type });
     return NextResponse.json(serializeOrder(order), { status: 201 });
   } catch (err) {
     console.error("POST /api/orders failed:", err);

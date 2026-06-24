@@ -14,9 +14,10 @@ function getSecret() {
 export interface SessionPayload extends JWTPayload {
   sub: string; // user id
   username: string;
+  role?: string;
 }
 
-export async function signSession(payload: { sub: string; username: string }): Promise<string> {
+export async function signSession(payload: { sub: string; username: string; role?: string }): Promise<string> {
   return new SignJWT(payload)
     .setProtectedHeader({ alg: "HS256" })
     .setIssuedAt()

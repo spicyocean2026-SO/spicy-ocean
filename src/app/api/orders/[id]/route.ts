@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { connectDB } from "@/lib/mongodb";
 import { Order, ITEM_STATUSES, serializeOrder } from "@/models/Order";
+import { publishOrdersChanged } from "@/lib/ably";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -28,6 +29,7 @@ const patchSchema = z.object({
   // Change quantity / remove (quantity 0 removes the item).
   itemQuantities: z.array(z.object({ menuItemId: z.string(), quantity: z.number().int().min(0) })).optional(),
   paymentStatus: z.enum(["pending", "paid"]).optional(),
+  tableFreed: z.boolean().optional(),
 });
 
 // PATCH /api/orders/[id] — update item statuses, quantities, or payment.
@@ -45,7 +47,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     const order = await Order.findById(id);
     if (!order) return NextResponse.json({ error: "Order not found." }, { status: 404 });
 
-    const { itemStatuses, allStatus, itemQuantities, paymentStatus } = parsed.data;
+    const { itemStatuses, allStatus, itemQuantities, paymentStatus, tableFreed } = parsed.data;
 
     if (allStatus) {
       order.items.forEach((i: any) => (i.status = allStatus));
@@ -64,8 +66,10 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
       order.items = order.items.filter((i: any) => i.quantity > 0) as any;
     }
     if (paymentStatus) order.paymentStatus = paymentStatus;
+    if (typeof tableFreed === "boolean") order.tableFreed = tableFreed;
 
     await order.save();
+    await publishOrdersChanged({ action: "update", id });
     return NextResponse.json(serializeOrder(order));
   } catch (err) {
     console.error("PATCH /api/orders/[id] failed:", err);
@@ -80,6 +84,7 @@ export async function DELETE(_request: Request, { params }: { params: Promise<{ 
     await connectDB();
     const order = await Order.findByIdAndUpdate(id, { $set: { status: "cleared" } }, { new: true });
     if (!order) return NextResponse.json({ error: "Order not found." }, { status: 404 });
+    await publishOrdersChanged({ action: "clear", id });
     return NextResponse.json({ ok: true });
   } catch (err) {
     console.error("DELETE /api/orders/[id] failed:", err);

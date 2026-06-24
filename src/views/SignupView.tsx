@@ -6,12 +6,14 @@ import Link from "next/link";
 import { motion } from "framer-motion";
 import { UserPlus, Loader2, KeyRound } from "lucide-react";
 import { toast } from "sonner";
+import { ROLES, Role } from "@/lib/roles";
 
 const SignupView: React.FC = () => {
   const router = useRouter();
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
+  const [role, setRole] = useState<Role>("server");
   const [creationPassword, setCreationPassword] = useState("");
   const [loading, setLoading] = useState(false);
 
@@ -27,7 +29,7 @@ const SignupView: React.FC = () => {
       const res = await fetch("/api/auth/signup", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ username, password, creationPassword }),
+        body: JSON.stringify({ username, password, creationPassword, role }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data?.error || "Signup failed");
@@ -66,6 +68,19 @@ const SignupView: React.FC = () => {
               className="w-full px-4 py-2.5 rounded-xl bg-muted border-0 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/30"
               placeholder="choose a username"
             />
+          </div>
+          <div>
+            <label className="text-sm font-medium text-foreground mb-1 block">Role</label>
+            <select
+              value={role}
+              onChange={(e) => setRole(e.target.value as Role)}
+              required
+              className="w-full px-4 py-2.5 rounded-xl bg-muted border-0 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30"
+            >
+              {ROLES.map((r) => (
+                <option key={r.value} value={r.value}>{r.label}</option>
+              ))}
+            </select>
           </div>
           <div>
             <label className="text-sm font-medium text-foreground mb-1 block">Password</label>

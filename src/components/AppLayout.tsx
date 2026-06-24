@@ -2,7 +2,7 @@
 
 import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
+import { useRouter, usePathname } from 'next/navigation';
 import { UtensilsCrossed, ChefHat, ReceiptText, Settings, PackageOpen, Coffee, BarChart3, PanelLeft, Wallet, User, LogOut } from 'lucide-react';
 import {
   Sidebar, SidebarContent, SidebarGroup, SidebarGroupContent, SidebarGroupLabel,
@@ -11,6 +11,7 @@ import {
 } from '@/components/ui/sidebar';
 import { NavLink } from '@/components/NavLink';
 import { canAccess, Role } from '@/lib/roles';
+import { useRestaurant } from '@/context/RestaurantContext';
 
 const mainNav = [
   { path: '/', label: 'Dine-In', icon: UtensilsCrossed },
@@ -30,6 +31,8 @@ const adminNav = [
 function AppSidebar() {
   const { state, isMobile, setOpenMobile } = useSidebar();
   const collapsed = state === 'collapsed';
+  const pathname = usePathname();
+  const { navBadges, markPageActive } = useRestaurant();
   const [role, setRole] = useState<Role | undefined>(undefined);
 
   useEffect(() => {
@@ -39,6 +42,9 @@ function AppSidebar() {
       .catch(() => {});
   }, []);
 
+  // Clear the badge for whatever page the user is currently on.
+  useEffect(() => { markPageActive(pathname); }, [pathname, markPageActive]);
+
   const visibleMain = mainNav.filter((n) => canAccess(role, n.path));
   const visibleAdmin = adminNav.filter((n) => canAccess(role, n.path));
 
@@ -46,6 +52,29 @@ function AppSidebar() {
     if (isMobile) {
       setOpenMobile(false);
     }
+  };
+
+  const renderItem = ({ path, label, icon: Icon }: { path: string; label: string; icon: typeof UtensilsCrossed }) => {
+    const count = navBadges[path] || 0;
+    const show = count > 0 && pathname !== path;
+    return (
+      <SidebarMenuItem key={path}>
+        <SidebarMenuButton asChild tooltip={label}>
+          <NavLink to={path} end className="relative hover:bg-sidebar-accent/50" activeClassName="bg-sidebar-accent text-primary font-semibold" onClick={handleNavClick}>
+            <Icon className="h-4 w-4" />
+            {!collapsed && <span>{label}</span>}
+            {show && !collapsed && (
+              <span className="ml-auto min-w-5 h-5 px-1.5 rounded-full bg-destructive text-destructive-foreground text-[10px] font-bold flex items-center justify-center">
+                {count}
+              </span>
+            )}
+            {show && collapsed && (
+              <span className="absolute -top-0.5 -right-0.5 w-2.5 h-2.5 rounded-full bg-destructive" />
+            )}
+          </NavLink>
+        </SidebarMenuButton>
+      </SidebarMenuItem>
+    );
   };
 
   return (
@@ -68,16 +97,7 @@ function AppSidebar() {
             <SidebarGroupLabel>Menu</SidebarGroupLabel>
             <SidebarGroupContent>
               <SidebarMenu>
-                {visibleMain.map(({ path, label, icon: Icon }) => (
-                  <SidebarMenuItem key={path}>
-                    <SidebarMenuButton asChild tooltip={label}>
-                      <NavLink to={path} end className="hover:bg-sidebar-accent/50" activeClassName="bg-sidebar-accent text-primary font-semibold" onClick={handleNavClick}>
-                        <Icon className="h-4 w-4" />
-                        {!collapsed && <span>{label}</span>}
-                      </NavLink>
-                    </SidebarMenuButton>
-                  </SidebarMenuItem>
-                ))}
+                {visibleMain.map(renderItem)}
               </SidebarMenu>
             </SidebarGroupContent>
           </SidebarGroup>
@@ -88,16 +108,7 @@ function AppSidebar() {
             <SidebarGroupLabel>Admin</SidebarGroupLabel>
             <SidebarGroupContent>
               <SidebarMenu>
-                {visibleAdmin.map(({ path, label, icon: Icon }) => (
-                  <SidebarMenuItem key={path}>
-                    <SidebarMenuButton asChild tooltip={label}>
-                      <NavLink to={path} end className="hover:bg-sidebar-accent/50" activeClassName="bg-sidebar-accent text-primary font-semibold" onClick={handleNavClick}>
-                        <Icon className="h-4 w-4" />
-                        {!collapsed && <span>{label}</span>}
-                      </NavLink>
-                    </SidebarMenuButton>
-                  </SidebarMenuItem>
-                ))}
+                {visibleAdmin.map(renderItem)}
               </SidebarMenu>
             </SidebarGroupContent>
           </SidebarGroup>

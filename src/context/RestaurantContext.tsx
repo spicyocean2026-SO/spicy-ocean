@@ -72,6 +72,8 @@ interface RestaurantContextType {
   freeTable: (order: TableOrder) => Promise<void>;
   clearOrder: (order: TableOrder) => Promise<void>;
   currentRole?: string;
+  navBadges: Record<string, number>;
+  markPageActive: (path: string) => void;
 
   // Counter auth
   isCounterAuthenticated: boolean;
@@ -130,6 +132,14 @@ export const RestaurantProvider: React.FC<{ children: ReactNode }> = ({ children
   // Current user's role — drives which live notifications this browser shows.
   const [currentRole, setCurrentRole] = useState<string | undefined>(undefined);
   const roleRef = useRef<string | undefined>(undefined);
+
+  // Unread counts shown next to sidebar nav items (keyed by route path).
+  const [navBadges, setNavBadges] = useState<Record<string, number>>({});
+  const activePathRef = useRef<string>('');
+  const markPageActive = useCallback((path: string) => {
+    activePathRef.current = path;
+    setNavBadges((prev) => (prev[path] ? { ...prev, [path]: 0 } : prev));
+  }, []);
   useEffect(() => {
     fetch('/api/auth/me', { cache: 'no-store' })
       .then((r) => (r.ok ? r.json() : null))
@@ -273,21 +283,26 @@ export const RestaurantProvider: React.FC<{ children: ReactNode }> = ({ children
 
       const role = roleRef.current;
       const first = firstLoad.current;
-      const labelOf = (o: TableOrder) => (o.type === 'DINE_IN' ? `Table ${o.tableNumber}` : (o.orderNo || o.orderId || ''));
 
-      // KITCHEN: notify when new items are sent to the kitchen.
+      // Increment a sidebar badge unless the user is already viewing that page.
+      const bump = (path: string) => {
+        if (path === activePathRef.current) return;
+        setNavBadges((prev) => ({ ...prev, [path]: (prev[path] || 0) + 1 }));
+      };
+
+      // KITCHEN: count new items sent to the kitchen -> badge on /kitchen.
       mapped.forEach((o) => {
         if (!o.orderId) return;
         const addedQty = o.items.filter((i) => i.status === 'added').reduce((s, i) => s + i.quantity, 0);
         const prev = addedSig.current.get(o.orderId) ?? 0;
         if (addedQty > prev && !first && role === 'kitchen') {
           playOrderSound();
-          toast.info('New items to prepare', { description: labelOf(o) });
+          bump('/kitchen');
         }
         addedSig.current.set(o.orderId, addedQty);
       });
 
-      // SERVER: notify when an order is fully ready to serve.
+      // SERVER: count orders newly ready to serve -> badge on / (Dine-In).
       const currentReady = new Set<string>();
       mapped.forEach((o) => {
         if (o.orderId && isOrderReady(o)) {
@@ -296,14 +311,14 @@ export const RestaurantProvider: React.FC<{ children: ReactNode }> = ({ children
             readyNotified.current.add(o.orderId);
             if (!first && role === 'server') {
               playReadySound();
-              toast.success('Order ready to serve!', { description: labelOf(o) });
+              bump('/');
             }
           }
         }
       });
       readyNotified.current.forEach((id) => { if (!currentReady.has(id)) readyNotified.current.delete(id); });
 
-      // CASHIER: notify when a table is freed and awaiting payment.
+      // CASHIER: count tables freed/awaiting payment -> badge on /counter.
       const currentFreed = new Set<string>();
       mapped.forEach((o) => {
         if (o.orderId && o.tableFreed) {
@@ -312,7 +327,7 @@ export const RestaurantProvider: React.FC<{ children: ReactNode }> = ({ children
             freedNotified.current.add(o.orderId);
             if (!first && role === 'cashier') {
               playReadySound();
-              toast.info('Table awaiting payment', { description: labelOf(o) });
+              bump('/counter');
             }
           }
         }
@@ -486,6 +501,7 @@ export const RestaurantProvider: React.FC<{ children: ReactNode }> = ({ children
       tables,
       activeOrders, ordersLoading, getTableOrder, refreshOrders, placeOrder,
       updateItemStatus, updateItemQuantity, markPaid, freeTable, clearOrder, currentRole,
+      navBadges, markPageActive,
       isCounterAuthenticated, authenticateCounter, logoutCounter, changePin,
       settings, updateSettings, playOrderSound, playReadySound,
       nextInvoiceNumber, getNextInvoice,
